@@ -5,6 +5,7 @@ module OpenCV.ImgProc.StructuralAnalysis
     ( contourArea
     , pointPolygonTest
     , findContours
+    , approxPolyDP
     , Contour(..)
     , ContourAreaOriented(..)
     , ContourRetrievalMode(..)
@@ -32,6 +33,7 @@ import qualified "inline-c" Language.C.Inline as C
 import qualified "inline-c-cpp" Language.C.Inline.Cpp as C
 import qualified "inline-c" Language.C.Inline.Unsafe as CU
 import "linear" Linear.V4 ( V4(..) )
+import "linear" Linear.V2 ( V2(..) )
 import "this" OpenCV.Core.Types ( Mut )
 import "this" OpenCV.Core.Types.Point
 import "this" OpenCV.Core.Types.Vec ( fromVec )
@@ -299,6 +301,50 @@ findContours mode method src = unsafePrimToPrim $
   where
     c'mode = marshalContourRetrievalMode mode
     c'method = marshalContourApproximationMethod method
+
+approxPolyDP :: V.Vector (V2 Int32)
+             -> Double -- ^ Epsilon
+             -> Bool   -- ^ Closed
+             -> V.Vector (V2 Int32)
+approxPolyDP points epsilon closed = unsafePerformIO $
+  withArrayPtr (V.map toPoint points) $ \pointsPtr ->
+  alloca $ \(approxLengthPtr :: Ptr Int32) ->
+  alloca $ \(approxPtrPtr :: Ptr (Ptr (Ptr C'Point2i))) -> do
+    [CU.exp|
+      void {
+        std::vector<cv::Point> approx;
+        cv::approxPolyDP
+          ( cv::_InputArray( $(Point2i * pointsPtr)
+                           , $(int32_t c'numPoints))
+          , approx
+          , $(double c'epsilon)
+          , $(bool c'closed)
+          );
+
+        cv::Point2i * * * approxPtrPtr = $(Point2i * * * approxPtrPtr);
+        cv::Point2i * * approxPtr = new cv::Point2i * [approx.size()];
+        *approxPtrPtr = approxPtr;
+
+        *$(int32_t * approxLengthPtr) = approx.size();
+
+        for (std::vector<cv::Point2i>::size_type i = 0; i != approx.size(); i++) {
+          approxPtr[i] = new cv::Point2i( approx[i] );
+        }
+      }
+    |]
+    numPoints <- fromIntegral <$> peek approxLengthPtr
+    approxPtr <- peek approxPtrPtr
+    (approx :: [V2 Int32]) <-
+        peekArray numPoints approxPtr >>=
+        mapM (fmap (fmap fromIntegral . fromPoint) . fromPtr . pure)
+    [CU.block| void {
+      delete [] *$(Point2i * * * approxPtrPtr);
+    }|]
+    pure (V.fromList approx)
+    where
+      c'numPoints = fromIntegral (V.length points)
+      c'closed    = fromBool closed
+      c'epsilon   = realToFrac epsilon
 
 minAreaRect :: (IsPoint2 point2 Int32)
             => V.Vector (point2 Int32) -> RotatedRect
