@@ -27,6 +27,9 @@ module OpenCV.Internal.Core.Types
       -- * Polygons
     , withPolygons
     , withArrayPtr
+      -- * Vector of Vectors
+    , withVectorOfVectorOfPoint2f
+    , withVectorOfVectorOfPoint3f
     ) where
 
 import "base" Control.Exception ( bracket_ )
@@ -54,6 +57,7 @@ import "this" OpenCV.Internal.C.PlacementNew
 import "this" OpenCV.Internal.C.PlacementNew.TH
 import "this" OpenCV.Internal.C.Types
 import qualified "vector" Data.Vector as V
+import qualified "vector" Data.Vector.Storable as VS
 
 --------------------------------------------------------------------------------
 
@@ -223,6 +227,50 @@ withPolygons polygons act =
                      go (acc `plusPtr` sizeOf (undefined :: Ptr (Ptr (C Point2i)))) (ix + 1)
             | otherwise = act polygonsPtr
       go polygonsPtr 0
+
+
+withVectorOfVectorOfPoint2f
+    :: forall a point2
+     . (IsPoint2 point2 CFloat)
+    => V.Vector (V.Vector (point2 CFloat))
+    -> (Ptr (Ptr (C Point2f)) -> Ptr Int32 -> IO a)
+    -> IO a
+withVectorOfVectorOfPoint2f vecOfVecs act =
+    allocaArray (V.length vecOfVecs) $ \vecOfVecsPtr -> do
+      let go :: Ptr (Ptr (C Point2f)) -> Int -> IO a
+          go !acc !ix
+            | ix < V.length vecOfVecs =
+                let pts = V.map toPoint $ V.unsafeIndex vecOfVecs ix
+                in withArrayPtr pts $ \ptsPtr -> do
+                     poke acc ptsPtr
+                     go (acc `plusPtr` sizeOf (undefined :: Ptr (Ptr (C Point2f)))) (ix + 1)
+            | otherwise = VS.unsafeWith npts (act vecOfVecsPtr)
+      go vecOfVecsPtr 0
+  where
+    npts :: VS.Vector Int32
+    npts = VS.convert $ V.map (fromIntegral . V.length) vecOfVecs
+
+-- FIXME just make a generic version of these for storable things...
+withVectorOfVectorOfPoint3f
+    :: forall a point3
+     . (IsPoint3 point3 CFloat)
+    => V.Vector (V.Vector (point3 CFloat))
+    -> (Ptr (Ptr (C Point3f)) -> Ptr Int32 -> IO a)
+    -> IO a
+withVectorOfVectorOfPoint3f vecOfVecs act =
+    allocaArray (V.length vecOfVecs) $ \vecOfVecsPtr -> do
+      let go :: Ptr (Ptr (C Point3f)) -> Int -> IO a
+          go !acc !ix
+            | ix < V.length vecOfVecs =
+                let pts = V.map toPoint $ V.unsafeIndex vecOfVecs ix
+                in withArrayPtr pts $ \ptsPtr -> do
+                     poke acc ptsPtr
+                     go (acc `plusPtr` sizeOf (undefined :: Ptr (Ptr (C Point3f)))) (ix + 1)
+            | otherwise = VS.unsafeWith npts (act vecOfVecsPtr)
+      go vecOfVecsPtr 0
+  where
+    npts :: VS.Vector Int32
+    npts = VS.convert $ V.map (fromIntegral . V.length) vecOfVecs
 
 -- | Perform an action with a temporary pointer to an array of values
 --
