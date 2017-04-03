@@ -120,7 +120,7 @@ calibrateCamera
     -> distCoeffs
     -> [CalibrateCameraFlags]
     -> TermCriteria
-    -> CvExcept (camMat, distCoeffs, rvecs, tvecs)
+    -> CvExcept (Double, camMat, distCoeffs, rvecs, tvecs)
 calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termCriteria =
   unsafeWrapException $
     withVectorOfVectorOfPoint3f objectPoints $ \objectPointsPtr objectPointsLengths ->
@@ -133,15 +133,18 @@ calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termC
     alloca $ \(rvecsLengthPtr :: Ptr Int32)    ->
     alloca $ \(rvecsPtrPtr :: Ptr (Ptr (Ptr C'Mat))) ->
     alloca $ \(tvecsLengthPtr :: Ptr Int32)    ->
-    alloca $ \(tvecsPtrPtr :: Ptr (Ptr (Ptr C'Mat))) -> do
+    alloca $ \(tvecsPtrPtr :: Ptr (Ptr (Ptr C'Mat))) ->
 
-    let cCalibrateCamera = do
+    alloca $ \rmsPtr -> do
+
+    let c'calibrateCamera = do
           [cvExcept|
 
             // Create a vector of vector of Point3f for objectPoints
             std::vector<std::vector<Point3f>> objectPoints;
             int32_t *objectPointsLengths = $(int32_t * objectPointsLengths);
             int32_t numObjectPoints = $(int32_t c'objectPointsPtrSize);
+            objectPoints.reserve(numObjectPoints);
             for (int i = 0; i < numObjectPoints; i++) {
               const Point3f *pointsAtIndex = $(const Point3f * * objectPointsPtr)[i];
               const int32_t numPointsAtIndex = objectPointsLengths[i];
@@ -156,6 +159,7 @@ calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termC
             std::vector<std::vector<Point2f>> imagePoints;
             int32_t *imagePointsLengths = $(int32_t * imagePointsLengths);
             int32_t numImagePoints = $(int32_t c'imagePointsPtrSize);
+            imagePoints.reserve(numImagePoints);
             for (int i = 0; i < numImagePoints; i++) {
               const Point2f *pointsAtIndex = $(const Point2f * * imagePointsPtr)[i];
               const int32_t numPointsAtIndex = imagePointsLengths[i];
@@ -169,7 +173,7 @@ calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termC
             std::vector<cv::Mat> rvecs;
             std::vector<cv::Mat> tvecs;
 
-            double rms = cv::calibrateCamera
+            *$(double * rmsPtr) = cv::calibrateCamera
               ( objectPoints
               , imagePoints
               , *$(Size2i * imageSizePtr)
@@ -181,7 +185,7 @@ calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termC
               , *$(TermCriteria * termCriteriaPtr)
               );
 
-            // Copy rvecs
+            // Copy rvecs into result
             cv::Mat * * * rvecsPtrPtr = $(Mat * * * rvecsPtrPtr);
             cv::Mat * * rvecsPtr = new cv::Mat * [rvecs.size()];
             *rvecsPtrPtr = rvecsPtr;
@@ -192,7 +196,7 @@ calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termC
               rvecsPtr[i] = new cv::Mat(rvecs[i]);
             }
 
-            // Copy tvecs
+            // Copy tvecs into result
             cv::Mat * * * tvecsPtrPtr = $(Mat * * * tvecsPtrPtr);
             cv::Mat * * tvecsPtr = new cv::Mat * [tvecs.size()];
             *tvecsPtrPtr = tvecsPtr;
@@ -203,7 +207,7 @@ calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termC
               rvecsPtr[i] = new cv::Mat(tvecs[i]);
             }
           |]
-    flip handleCvException cCalibrateCamera $ do
+    flip handleCvException c'calibrateCamera $ do
       -- Extract the mats
       rvecsLength <- fromIntegral <$> peek rvecsLengthPtr
       rvecsPtr    <- peek rvecsPtrPtr
@@ -223,7 +227,9 @@ calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termC
 
       newCamMat <- fromPtr (pure camMatPtr)
       newDistCoeffs <- fromPtr (pure distCoeffsPtr)
-      return (newCamMat, newDistCoeffs, rvecs, tvecs)
+
+      rms <- realToFrac <$> peek rmsPtr
+      return (rms, newCamMat, newDistCoeffs, rvecs, tvecs)
 
   where
     c'objectPointsPtrSize = fromIntegral $ V.length objectPoints
