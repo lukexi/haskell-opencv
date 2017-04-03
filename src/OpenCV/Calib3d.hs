@@ -19,9 +19,12 @@ import "base" Foreign.C.Types
 import "base" Foreign.Ptr (Ptr)
 import "base" Foreign.Marshal.Alloc ( alloca )
 import "base" Foreign.Marshal.Array ( peekArray )
+import "base" Foreign.Marshal.Utils ( toBool )
 import "base" Foreign.Storable (peek)
+import "base" System.IO.Unsafe ( unsafePerformIO )
 import qualified "inline-c" Language.C.Inline as C
 import qualified "inline-c-cpp" Language.C.Inline.Cpp as C
+import qualified "inline-c" Language.C.Inline.Unsafe as CU
 import "this" OpenCV.Internal.C.Inline ( openCvCtx )
 import "this" OpenCV.Internal.C.Types
 import "this" OpenCV.Internal.Calib3d.Constants
@@ -82,8 +85,8 @@ data CalibrateCameraFlags
   | CALIB_THIN_PRISM_MODEL
   | CALIB_FIX_S1_S2_S3_S4
 
-cCalibrateCameraFlags :: CalibrateCameraFlags -> Int32
-cCalibrateCameraFlags = \case
+c'CalibrateCameraFlags :: CalibrateCameraFlags -> Int32
+c'CalibrateCameraFlags = \case
   CV_CALIB_USE_INTRINSIC_GUESS -> c'CV_CALIB_USE_INTRINSIC_GUESS
   CV_CALIB_FIX_PRINCIPAL_POINT -> c'CV_CALIB_FIX_PRINCIPAL_POINT
   CV_CALIB_FIX_ASPECT_RATIO    -> c'CV_CALIB_FIX_ASPECT_RATIO
@@ -99,7 +102,7 @@ cCalibrateCameraFlags = \case
   CALIB_FIX_S1_S2_S3_S4        -> c'CALIB_FIX_S1_S2_S3_S4
 
 marshalCalibrateCameraFlags :: [CalibrateCameraFlags] -> Int32
-marshalCalibrateCameraFlags = foldl' (.|.) 0 . map cCalibrateCameraFlags
+marshalCalibrateCameraFlags = foldl' (.|.) 0 . map c'CalibrateCameraFlags
 
 -- {- |
 -- <http://docs.opencv.org/3.0-last-rst/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html#calibratecamera OpenCV Sphinx doc>
@@ -121,8 +124,11 @@ calibrateCamera
     -> [CalibrateCameraFlags]
     -> TermCriteria
     -> CvExcept (Double, camMat, distCoeffs, rvecs, tvecs)
-calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termCriteria =
-  unsafeWrapException $
+calibrateCamera
+  objectPoints imagePoints
+  imageSize camMat
+  distCoeffs flags
+  termCriteria = unsafeWrapException $
     withVectorOfVectorOfPoint3f objectPoints $ \objectPointsPtr objectPointsLengths ->
     withVectorOfVectorOfPoint2f imagePoints  $ \imagePointsPtr imagePointsLengths  ->
     withPtr (toSize imageSize)               $ \imageSizePtr    ->
@@ -236,6 +242,55 @@ calibrateCamera objectPoints imagePoints imageSize camMat distCoeffs flags termC
     c'imagePointsPtrSize  = fromIntegral $ V.length imagePoints
     c'calibrateCameraFlags = marshalCalibrateCameraFlags flags
 
+
+data FindCirclesGridFlags
+  = CALIB_CB_SYMMETRIC_GRID
+  | CALIB_CB_ASYMMETRIC_GRID
+  | CALIB_CB_CLUSTERING
+
+c'FindCirclesGridFlags :: FindCirclesGridFlags -> Int32
+c'FindCirclesGridFlags = \case
+  CALIB_CB_SYMMETRIC_GRID -> c'CALIB_CB_SYMMETRIC_GRID
+  CALIB_CB_ASYMMETRIC_GRID -> c'CALIB_CB_ASYMMETRIC_GRID
+  CALIB_CB_CLUSTERING -> c'CALIB_CB_CLUSTERING
+
+marshalFindCirclesGridFlags :: [FindCirclesGridFlags] -> Int32
+marshalFindCirclesGridFlags = foldl' (.|.) 0 . map c'FindCirclesGridFlags
+
+findCirclesGrid
+  :: ( IsSize patternSize Int32 )
+  => Mat shape channels depth
+  -> patternSize Int32
+  -> [FindCirclesGridFlags]
+  -> (Bool, V.Vector Point2f)
+findCirclesGrid image patternSize flags = unsafePerformIO $
+  withPtr image                $ \imgPtr ->
+  withPtr (toSize patternSize) $ \patternSizePtr ->
+  alloca                       $ \(numCentersPtr :: Ptr Int32) ->
+  alloca                       $ \(centersPtrPtr :: Ptr (Ptr (Ptr C'Point2f))) -> do
+    patternFound <- toBool <$> [CU.block| bool {
+      std::vector<cv::Point2f> centers;
+
+      bool patternfound = findCirclesGrid
+        ( *$(Mat * imgPtr)
+        , *$(Size2i * patternSizePtr)
+        , centers);
+      // Copy centers into result
+      *$(int32_t * numCentersPtr) = centers.size();
+      cv::Point2f * * centersPtr = new cv::Point2f * [centers.size()];
+      *$(Point2f * * * centersPtrPtr) = centersPtr;
+      for (int i = 0; i < centers.size(); i++) {
+        centersPtr[i] = new cv::Point2f(centers[i]);
+      }
+
+      return patternfound;
+    }|]
+    numCenters <- fromIntegral <$> peek numCentersPtr
+    centersPtr   <- peek centersPtrPtr
+    centers      <- V.fromList <$>
+      (mapM (fromPtr . return) =<< peekArray numCenters centersPtr)
+    [CU.block| void { delete [] *$(Point2f * * * centersPtrPtr); }|]
+    return (patternFound, centers)
 
 {- | Calculates a fundamental matrix from the corresponding points in two images
 

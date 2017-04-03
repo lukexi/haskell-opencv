@@ -18,7 +18,7 @@ module OpenCV.Internal.Calib3d.Constants where
 #num CV_FM_LMEDS
 
 
-
+-- calibrateCamera flags
 #num CV_CALIB_USE_INTRINSIC_GUESS
 #num CV_CALIB_FIX_PRINCIPAL_POINT
 #num CV_CALIB_FIX_ASPECT_RATIO
@@ -32,3 +32,8 @@ module OpenCV.Internal.Calib3d.Constants where
 #num CV_CALIB_RATIONAL_MODEL
 #num CALIB_THIN_PRISM_MODEL
 #num CALIB_FIX_S1_S2_S3_S4
+
+-- findCirclesGrid flags
+#num CALIB_CB_SYMMETRIC_GRID
+#num CALIB_CB_ASYMMETRIC_GRID
+#num CALIB_CB_CLUSTERING
