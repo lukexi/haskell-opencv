@@ -52,6 +52,8 @@ module OpenCV.ImgProc.GeometricImgTransform
     , getPerspectiveTransform
     , getRotationMatrix2D
     , remap
+    , undistort
+    , undistortPoints
     ) where
 
 import "base" Data.Int ( Int32 )
@@ -394,3 +396,46 @@ remap src mapping interpolationMethod borderMode = unsafeWrapException $ do
   where
     c'interpolation = marshalInterpolationMethod interpolationMethod
     (c'borderMode, borderValue) = marshalBorderMode borderMode
+
+
+
+undistort src cameraMatrix distCoeffs newCameraMatrix = unsafePerformIO $ do
+  dst <- newEmptyMat
+
+  withPtr src               $ \srcPtr             ->
+    withPtr dst             $ \dstPtr             ->
+    withPtr cameraMatrix    $ \cameraMatrixPtr    ->
+    withPtr distCoeffs      $ \distCoeffsPtr      ->
+    withPtr newCameraMatrix $ \newCameraMatrixPtr ->
+      [CU.block| void {
+        cv::undistort
+          ( *$(Mat * srcPtr)
+          , *$(Mat * dstPtr)
+          , *$(Mat * cameraMatrixPtr)
+          , *$(Mat * distCoeffsPtr)
+          , *$(Mat * newCameraMatrixPtr)
+          );
+      } |]
+
+  return dst
+
+
+undistortPoints src cameraMatrix distCoeffs = unsafePerformIO $ do
+  dst <- newEmptyMat
+
+  withPtr src               $ \srcPtr             ->
+    withPtr dst             $ \dstPtr             ->
+    withPtr cameraMatrix    $ \cameraMatrixPtr    ->
+    withPtr distCoeffs      $ \distCoeffsPtr      ->
+    [CU.block| void {
+
+      cv::undistortPoints
+        ( *$(Mat * srcPtr)
+        , *$(Mat * dstPtr)
+        , *$(Mat * cameraMatrixPtr)
+        , *$(Mat * distCoeffsPtr)
+        , noArray()
+        , noArray()
+        );
+    } |]
+  return dst
