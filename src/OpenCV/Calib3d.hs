@@ -319,7 +319,21 @@ marshalSolvePnPFlags = foldl' (.|.) 0 . map c'SolvePnPFlags
       SOLVEPNP_DLS       -> c'SOLVEPNP_DLS
       SOLVEPNP_UPNP      -> c'SOLVEPNP_UPNP
 
-
+solvePnP
+  :: ( camMat     ~ Mat (ShapeT [3, 3]) ('S 1) ('S Double)
+     , distCoeffs ~ Mat shape           ('S 1) ('S Double)
+     , IsPoint2 point2 CFloat
+     , IsPoint3 point3 CFloat
+     , rvecs ~ V.Vector (Mat shape ('S 1) depth)
+     , tvecs ~ V.Vector (Mat shape ('S 1) depth)
+     )
+  => V.Vector (point3 CFloat) -- ^ Object points
+  -> V.Vector (point2 CFloat) -- ^ Image points
+  -> camMat
+  -> distCoeffs
+  -> Bool
+  -> [SolvePnPFlags]
+  -> (rvecs, tvecs)
 solvePnP
   objectPoints imagePoints
   cameraMatrix distCoeffs
@@ -332,15 +346,15 @@ solvePnP
   alloca $ \(rvecsLengthPtr :: Ptr Int32)                      ->
   alloca $ \(rvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat)))          ->
   alloca $ \(tvecsLengthPtr :: Ptr Int32)                      ->
-  alloca $ \(tvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat)))          ->
+  alloca $ \(tvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat)))          -> do
 
     [CU.block| void {
 
       cv::_InputArray objectPoints = cv::_InputArray
-        ( $(Point2d * objectPointsPtr)
+        ( $(Point3f * objectPointsPtr)
         , $(int32_t c'numObjectPoints));
       cv::_InputArray imagePoints  = cv::_InputArray
-        ( $(Point2d * imagePointsPtr)
+        ( $(Point2f * imagePointsPtr)
         , $(int32_t c'numImagePoints));
 
       std::vector<cv::Mat> rvecs;
@@ -378,6 +392,11 @@ solvePnP
         tvecsPtr[i] = new cv::Mat(tvecs[i]);
       }
     }|]
+
+    rvecs <- peekMatVector rvecsPtrPtr rvecsLengthPtr
+    tvecs <- peekMatVector tvecsPtrPtr tvecsLengthPtr
+    return (rvecs, tvecs)
+
   where
     c'numObjectPoints   = fromIntegral $ V.length objectPoints
     c'numImagePoints    = fromIntegral $ V.length imagePoints
