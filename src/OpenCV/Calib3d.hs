@@ -4,7 +4,6 @@
 module OpenCV.Calib3d
     ( FundamentalMatMethod(..)
     , WhichImage(..)
-    -- , calibrateCamera
     , findFundamentalMat
     , computeCorrespondEpilines
     , CalibrateCameraFlags(..)
@@ -140,10 +139,10 @@ calibrateCamera
     withPtr distCoeffs                       $ \distCoeffsPtr   ->
     withPtr termCriteria                     $ \termCriteriaPtr ->
 
-    alloca $ \(rvecsLengthPtr :: Ptr Int32)    ->
-    alloca $ \(rvecsPtrPtr :: Ptr (Ptr (Ptr C'Mat))) ->
-    alloca $ \(tvecsLengthPtr :: Ptr Int32)    ->
-    alloca $ \(tvecsPtrPtr :: Ptr (Ptr (Ptr C'Mat))) ->
+    alloca $ \(rvecsLengthPtr :: Ptr Int32)             ->
+    alloca $ \(rvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat))) ->
+    alloca $ \(tvecsLengthPtr :: Ptr Int32)             ->
+    alloca $ \(tvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat))) ->
 
     alloca $ \rmsPtr -> do
 
@@ -348,7 +347,7 @@ solvePnP
       std::vector<cv::Mat> tvecs;
 
       solvePnP
-        ( imagePoints
+        ( objectPoints
         , imagePoints
         , *$(Mat *cameraMatrixPtr)
         , *$(Mat *distCoeffsPtr)

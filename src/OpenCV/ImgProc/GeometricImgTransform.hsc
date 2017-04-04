@@ -439,3 +439,54 @@ undistortPoints src cameraMatrix distCoeffs = unsafePerformIO $ do
         );
     } |]
   return dst
+
+
+#num CV_32FC1
+#num CV_16SC2
+
+data UndistortMapM1Type
+  = UndistortMap'CV_32FC1
+  | UndistortMap'CV_16SC2
+
+marshallM1Type = \case
+  UndistortMap'CV_32FC1 -> c'CV_32FC1
+  UndistortMap'CV_16SC2 -> c'CV_16SC2
+
+initUndistortRectifyMap
+  :: (IsSize imageSize Int32)
+  => Mat (ShapeT [3, 3]) ('S 1) ('S Double) -- cameraMatrix
+  -> Mat size channels          ('S Double) -- distCoeffs
+  -> Mat (ShapeT [3, 3]) ('S 1) ('S Double) -- R
+  -> Mat (ShapeT [3, 3]) ('S 1) ('S Double) -- newCameraMatrix
+  -> imageSize Int32                        -- imageSize
+  -> UndistortMapM1Type                     -- m1 type
+  -> (Mat size channels depth, Mat size channels depth)
+initUndistortRectifyMap
+  cameraMatrix distCoeffs r
+  newCameraMatrix size m1type = unsafePerformIO $ do
+  map1 <- newEmptyMat
+  map2 <- newEmptyMat
+  withPtr cameraMatrix      $ \cameraMatrixPtr    ->
+    withPtr distCoeffs      $ \distCoeffsPtr      ->
+    withPtr r               $ \rPtr               ->
+    withPtr newCameraMatrix $ \newCameraMatrixPtr ->
+    withPtr (toSize size)   $ \sizePtr            ->
+    withPtr map1            $ \map1Ptr            ->
+    withPtr map2            $ \map2Ptr            ->
+    [CU.block| void {
+
+      cv::initUndistortRectifyMap
+        ( *$(Mat * cameraMatrixPtr)
+        , *$(Mat * distCoeffsPtr)
+        , *$(Mat * rPtr)
+        , *$(Mat * newCameraMatrixPtr)
+        , *$(Size2i * sizePtr)
+        , $(int32_t c'm1type)
+        , *$(Mat * map1Ptr)
+        , *$(Mat * map2Ptr)
+        );
+    }|]
+  return (unsafeCoerceMat map1, unsafeCoerceMat map2)
+
+  where
+    c'm1type = marshallM1Type m1type
