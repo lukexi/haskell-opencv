@@ -12,6 +12,7 @@ module OpenCV.ImgProc.StructuralAnalysis
     , approxPolyDP
     , arcLength
     , minAreaRect
+    , convexHull
     ) where
 
 import "primitive" Control.Monad.Primitive ( PrimMonad, PrimState, unsafePrimToPrim )
@@ -387,3 +388,53 @@ minAreaRect points =
       }
     |]
   where c'numPoints = fromIntegral (V.length points)
+
+
+convexHull
+  :: (IsPoint2 point2 Int32)
+  => V.Vector (point2 Int32)
+  -> V.Vector Point2i
+convexHull polygon = unsafePerformIO $
+    withArrayPtr (V.map toPoint polygon) $ \polygonPtr ->
+    alloca $ \(pointsResPtrPtr ::Ptr (Ptr (Ptr C'Point2i))) ->
+    alloca $ \(numPointsResPtr :: Ptr Int32) -> do
+        [C.block| void{
+            // Output vector
+            std::vector<cv::Point> points_res;
+
+            // Input vector
+            cv::_InputArray polygon = cv::_InputArray
+              ( $(Point2i * polygonPtr)
+              , $(int32_t c'numPoints));
+            cv::convexHull
+              ( polygon
+              , points_res
+              );
+
+            *$(int32_t * numPointsResPtr) = points_res.size();
+
+            cv::Point * * * pointsResPtrPtr = $(Point2i * * * pointsResPtrPtr);
+            cv::Point * * pointsResPtr = new cv::Point * [points_res.size()];
+            *pointsResPtrPtr = pointsResPtr;
+
+            for (std::vector<cv::Point>::size_type i = 0; i < points_res.size(); i++) {
+                cv::Point & ptAddress = points_res[i];
+                cv::Point * newPt = new cv::Point(ptAddress.x, ptAddress.y);
+                pointsResPtr[i] = newPt;
+            }
+        }|]
+
+        numPoints <- fromIntegral <$> peek numPointsResPtr
+
+        pointsResPtr <- peek pointsResPtrPtr
+        pointsRes <-
+          fmap V.fromList . mapM (fromPtr . pure)
+            =<< peekArray numPoints pointsResPtr
+
+        [CU.block| void {
+            delete [] *$(Point2i * * * pointsResPtrPtr);
+        } |]
+
+        return pointsRes
+    where
+        c'numPoints = fromIntegral $ V.length polygon
