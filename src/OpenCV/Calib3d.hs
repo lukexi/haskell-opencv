@@ -12,6 +12,7 @@ module OpenCV.Calib3d
     , findCirclesGrid
     , SolvePnPFlags(..)
     , solvePnP
+    , drawChessboardCorners
     ) where
 
 import "base" Data.Int
@@ -309,7 +310,40 @@ findCirclesGrid image patternSize flags = unsafeWrapException $
   where
     c'findCirclesGridFlags = marshalFindCirclesGridFlags flags
 
+drawChessboardCorners
+  :: ( IsSize patternSize Int32
+     , IsPoint2 point2 CFloat
+     )
+  => Mat shape channels depth
+  -> patternSize Int32
+  -> V.Vector (point2 CFloat)
+  -> Bool
+  -> CvExcept (Mat shape channels depth)
+drawChessboardCorners image patternSize corners patternWasFound = do
 
+  unsafeWrapException $ do
+    mutImage <- thaw image
+    id $
+      withPtr mutImage                        $ \imagePtr              ->
+      withPtr (toSize patternSize)            $ \patternSizePtr        ->
+      withArrayPtrLen (V.map toPoint corners) $ \cornersPtr cornersLen ->
+      flip handleCvException
+      [cvExcept|
+
+        cv::_InputArray corners = cv::_InputArray
+          ( $(Point2f * cornersPtr)
+          , $(int32_t   cornersLen));
+
+        drawChessboardCorners
+          ( *$(Mat * imagePtr)
+          , *$(Size2i * patternSizePtr)
+          , corners
+          , $(bool c'PatternWasFound)
+          );
+      |] $ do
+        freeze mutImage
+  where
+    c'PatternWasFound = fromBool patternWasFound
 
 data SolvePnPFlags
  = SOLVEPNP_ITERATIVE
@@ -388,6 +422,10 @@ solvePnP
     c'numImagePoints    = fromIntegral $ V.length imagePoints
     c'solvePnPFlags     = marshalSolvePnPFlags flags
     c'useExtrinsicGuess = fromBool useExtrinsicGuess
+
+withArrayPtrLen array action =
+  withArrayPtr array (\arrayPtr -> action arrayPtr arrayLen)
+  where arrayLen = fromIntegral $ V.length array
 
 {- | Calculates a fundamental matrix from the corresponding points in two images
 
@@ -492,3 +530,6 @@ computeCorrespondEpilines points whichImage fm = unsafeWrapException $ do
   where
     c'numPoints = fromIntegral $ V.length points
     c'whichImage = marshalWhichImage whichImage
+
+
+
