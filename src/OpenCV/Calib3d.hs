@@ -24,7 +24,6 @@ import "base" Foreign.Marshal.Alloc ( alloca )
 import "base" Foreign.Marshal.Array ( peekArray )
 import "base" Foreign.Marshal.Utils ( toBool, fromBool )
 import "base" Foreign.Storable (peek, Storable)
-import "base" System.IO.Unsafe ( unsafePerformIO )
 import qualified "inline-c" Language.C.Inline as C
 import qualified "inline-c-cpp" Language.C.Inline.Cpp as C
 import qualified "inline-c" Language.C.Inline.Unsafe as CU
@@ -271,36 +270,41 @@ findCirclesGrid
   => Mat shape channels depth
   -> patternSize Int32
   -> [FindCirclesGridFlags]
-  -> (Bool, V.Vector Point2f)
-findCirclesGrid image patternSize flags = unsafePerformIO $
-  withPtr image                $ \imgPtr ->
-  withPtr (toSize patternSize) $ \patternSizePtr ->
-  alloca                       $ \(numCentersPtr :: Ptr Int32) ->
-  alloca                       $ \(centersPtrPtr :: Ptr (Ptr (Ptr C'Point2f))) -> do
-    patternFound <- toBool <$> [CU.block| bool {
-      std::vector<cv::Point2f> centers;
+  -> CvExcept (Bool, V.Vector Point2f)
+findCirclesGrid image patternSize flags = unsafeWrapException $
+  withPtr image                $ \imgPtr                                       ->
+  withPtr (toSize patternSize) $ \patternSizePtr                               ->
+  alloca                       $ \(numCentersPtr :: Ptr Int32)                 ->
+  alloca                       $ \(centersPtrPtr :: Ptr (Ptr (Ptr C'Point2f))) ->
+  alloca                       $ \(resultPtr     :: Ptr CInt)                  ->
+  flip handleCvException
+  [cvExcept|
+    std::vector<cv::Point2f> centers;
 
-      bool patternfound = findCirclesGrid
-        ( *$(Mat * imgPtr)
-        , *$(Size2i * patternSizePtr)
-        , centers
-        , $(int32_t c'findCirclesGridFlags)
-        );
-      // Copy centers into result
-      *$(int32_t * numCentersPtr) = centers.size();
-      cv::Point2f * * centersPtr = new cv::Point2f * [centers.size()];
-      *$(Point2f * * * centersPtrPtr) = centersPtr;
-      for (int i = 0; i < centers.size(); i++) {
-        centersPtr[i] = new cv::Point2f(centers[i]);
-      }
+    bool patternFound = findCirclesGrid
+      ( *$(Mat * imgPtr)
+      , *$(Size2i * patternSizePtr)
+      , centers
+      , $(int32_t c'findCirclesGridFlags)
+      );
+    // Copy centers into result
+    *$(int32_t * numCentersPtr) = centers.size();
+    cv::Point2f * * centersPtr = new cv::Point2f * [centers.size()];
+    *$(Point2f * * * centersPtrPtr) = centersPtr;
+    for (int i = 0; i < centers.size(); i++) {
+      centersPtr[i] = new cv::Point2f(centers[i]);
+    }
 
-      return patternfound;
-    }|]
+    *$(bool *resultPtr) = patternFound ? 1 : 0;
+  |] $ do
+    patternFound <- toBool <$> peek resultPtr
+
     numCenters <- fromIntegral <$> peek numCentersPtr
     centersPtr   <- peek centersPtrPtr
     centers      <- V.fromList <$>
       (mapM (fromPtr . return) =<< peekArray numCenters centersPtr)
     [CU.block| void { delete [] *$(Point2f * * * centersPtrPtr); }|]
+
     return (patternFound, centers)
   where
     c'findCirclesGridFlags = marshalFindCirclesGridFlags flags
@@ -330,8 +334,6 @@ solvePnP
      , distCoeffs ~ Mat shape           ('S 1) ('S Double)
      , IsPoint2 point2 CFloat
      , IsPoint3 point3 CFloat
-     , rvecs ~ V.Vector (Mat shape ('S 1) depth)
-     , tvecs ~ V.Vector (Mat shape ('S 1) depth)
      )
   => V.Vector (point3 CFloat) -- ^ Object points
   -> V.Vector (point2 CFloat) -- ^ Image points
@@ -339,23 +341,20 @@ solvePnP
   -> distCoeffs
   -> Bool
   -> [SolvePnPFlags]
-  -> (rvecs, tvecs)
+  -> CvExcept (Point3f, Point3f)
 solvePnP
   objectPoints imagePoints
   cameraMatrix distCoeffs
-  useExtrinsicGuess flags = unsafePerformIO $
+  useExtrinsicGuess flags = unsafeWrapException $
 
-  withArrayPtr (V.map toPoint objectPoints) $ \objectPointsPtr ->
-  withArrayPtr (V.map toPoint imagePoints)  $ \imagePointsPtr  ->
-  withPtr cameraMatrix                      $ \cameraMatrixPtr ->
-  withPtr distCoeffs                        $ \distCoeffsPtr   ->
-  alloca $ \(rvecsLengthPtr :: Ptr Int32)                      ->
-  alloca $ \(rvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat)))          ->
-  alloca $ \(tvecsLengthPtr :: Ptr Int32)                      ->
-  alloca $ \(tvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat)))          -> do
-
-    [CU.block| void {
-
+    withArrayPtr (V.map toPoint objectPoints) $ \objectPointsPtr ->
+    withArrayPtr (V.map toPoint imagePoints)  $ \imagePointsPtr  ->
+    withPtr cameraMatrix                      $ \cameraMatrixPtr ->
+    withPtr distCoeffs                        $ \distCoeffsPtr   ->
+    alloca                                    $ \rvecPtrPtr      ->
+    alloca                                    $ \tvecPtrPtr      ->
+    flip handleCvException
+    [cvExcept|
       cv::_InputArray objectPoints = cv::_InputArray
         ( $(Point3f * objectPointsPtr)
         , $(int32_t c'numObjectPoints));
@@ -363,46 +362,27 @@ solvePnP
         ( $(Point2f * imagePointsPtr)
         , $(int32_t c'numImagePoints));
 
-      std::vector<cv::Mat> rvecs;
-      std::vector<cv::Mat> tvecs;
-
+      cv::Mat rvec(3,1,cv::DataType<float>::type);
+      cv::Mat tvec(3,1,cv::DataType<float>::type);
       solvePnP
         ( objectPoints
         , imagePoints
         , *$(Mat *cameraMatrixPtr)
         , *$(Mat *distCoeffsPtr)
-        , rvecs
-        , tvecs
+        , rvec
+        , tvec
         , $(bool c'useExtrinsicGuess)
         , $(int32_t c'solvePnPFlags)
         );
-      // Copy rvecs into result
-      cv::Mat * * * rvecsPtrPtr = $(Mat * * * rvecsPtrPtr);
-      cv::Mat * * rvecsPtr = new cv::Mat * [rvecs.size()];
-      *rvecsPtrPtr = rvecsPtr;
 
-      *$(int32_t * rvecsLengthPtr) = rvecs.size();
-
-      for(int i = 0; i < rvecs.size(); i++){
-        rvecsPtr[i] = new cv::Mat(rvecs[i]);
-      }
-
-      // Copy tvecs into result
-      cv::Mat * * * tvecsPtrPtr = $(Mat * * * tvecsPtrPtr);
-      cv::Mat * * tvecsPtr = new cv::Mat * [tvecs.size()];
-      *tvecsPtrPtr = tvecsPtr;
-
-      *$(int32_t * tvecsLengthPtr) = tvecs.size();
-
-      for(int i = 0; i < tvecs.size(); i++){
-        tvecsPtr[i] = new cv::Mat(tvecs[i]);
-      }
-    }|]
-
-    rvecs <- peekMatVector rvecsPtrPtr rvecsLengthPtr
-    tvecs <- peekMatVector tvecsPtrPtr tvecsLengthPtr
-    return (rvecs, tvecs)
-
+      *$(Point3f * * rvecPtrPtr) = new cv::Point3f(rvec);
+      *$(Point3f * * tvecPtrPtr) = new cv::Point3f(tvec);
+    |] $ do
+      rvecPtr <- peek rvecPtrPtr
+      tvecPtr <- peek tvecPtrPtr
+      rvec <- fromPtr (pure rvecPtr)
+      tvec <- fromPtr (pure tvecPtr)
+      return (rvec, tvec)
   where
     c'numObjectPoints   = fromIntegral $ V.length objectPoints
     c'numImagePoints    = fromIntegral $ V.length imagePoints
