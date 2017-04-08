@@ -27,10 +27,10 @@ import "base" Foreign.Marshal.Utils ( toBool, fromBool )
 import "base" Foreign.Storable (peek, Storable)
 import qualified "inline-c" Language.C.Inline as C
 import qualified "inline-c-cpp" Language.C.Inline.Cpp as C
-import qualified "inline-c" Language.C.Inline.Unsafe as CU
 import "this" OpenCV.Internal.C.Inline ( openCvCtx )
 import "this" OpenCV.Internal.C.Types
 import "this" OpenCV.Internal.Calib3d.Constants
+import "this" OpenCV.Features2d
 import "this" OpenCV.Core.Types
 import "this" OpenCV.Internal.Core.Types
 import "this" OpenCV.Internal.Core.Types.Mat
@@ -45,6 +45,7 @@ C.context openCvCtx
 
 C.include "opencv2/core.hpp"
 C.include "opencv2/calib3d.hpp"
+C.include "simple_blob_detector.hpp"
 C.using "namespace cv"
 
 --------------------------------------------------------------------------------
@@ -220,8 +221,8 @@ calibrateCamera
         |] $ do -- when no exception...
 
           -- Extract the rotation and translation vectors
-          rvecs <- peekMatVector rvecsPtrPtr rvecsLengthPtr
-          tvecs <- peekMatVector tvecsPtrPtr tvecsLengthPtr
+          rvecs <- peekVector rvecsPtrPtr rvecsLengthPtr deleteMatArray
+          tvecs <- peekVector tvecsPtrPtr tvecsLengthPtr deleteMatArray
 
           rms <- realToFrac <$> peek rmsPtr
           return (rms, newCamMat, newDistCoeffs, rvecs, tvecs)
@@ -231,26 +232,7 @@ calibrateCamera
     c'imagePointsPtrSize  = fromIntegral $ V.length imagePoints
     c'calibrateCameraFlags = marshalCalibrateCameraFlags flags
 
-peekMatVector
-  :: ( C a ~ C'Mat
-     , FromPtr a
-     , Storable len
-     , Integral len
-     )
-  => Ptr (Ptr (Ptr C'Mat))
-  -> Ptr len
-  -> IO (V.Vector a)
-peekMatVector arrayPtrPtr lengthPtr = do
-  arrayLength <- fromIntegral <$> peek lengthPtr
-  arrayPtr     <- peek arrayPtrPtr
-  vector       <-
-    fmap V.fromList . mapM (fromPtr . pure) =<< peekArray arrayLength arrayPtr
 
-  [C.block| void {
-      delete [] *$(Mat * * * arrayPtrPtr);
-  } |]
-
-  return vector
 
 data FindCirclesGridFlags
   = CALIB_CB_SYMMETRIC_GRID
@@ -271,22 +253,28 @@ findCirclesGrid
   => Mat shape channels depth
   -> patternSize Int32
   -> [FindCirclesGridFlags]
+  -> SimpleBlobDetector
   -> CvExcept (Bool, V.Vector Point2f)
-findCirclesGrid image patternSize flags = unsafeWrapException $
+findCirclesGrid image patternSize flags detector
+  = unsafeWrapException $
   withPtr image                $ \imgPtr                                       ->
   withPtr (toSize patternSize) $ \patternSizePtr                               ->
   alloca                       $ \(numCentersPtr :: Ptr Int32)                 ->
   alloca                       $ \(centersPtrPtr :: Ptr (Ptr (Ptr C'Point2f))) ->
   alloca                       $ \(resultPtr     :: Ptr CInt)                  ->
+  withPtr detector             $ \detectorPtr ->
   flip handleCvException
   [cvExcept|
     std::vector<cv::Point2f> centers;
+
+    cv::Ptr<cv::SimpleBlobDetector> blobDetector = *$(Ptr_SimpleBlobDetector * detectorPtr);
 
     bool patternFound = findCirclesGrid
       ( *$(Mat * imgPtr)
       , *$(Size2i * patternSizePtr)
       , centers
       , $(int32_t c'findCirclesGridFlags)
+      , blobDetector
       );
     // Copy centers into result
     *$(int32_t * numCentersPtr) = centers.size();
@@ -299,12 +287,7 @@ findCirclesGrid image patternSize flags = unsafeWrapException $
     *$(bool *resultPtr) = patternFound ? 1 : 0;
   |] $ do
     patternFound <- toBool <$> peek resultPtr
-
-    numCenters <- fromIntegral <$> peek numCentersPtr
-    centersPtr   <- peek centersPtrPtr
-    centers      <- V.fromList <$>
-      (mapM (fromPtr . return) =<< peekArray numCenters centersPtr)
-    [CU.block| void { delete [] *$(Point2f * * * centersPtrPtr); }|]
+    centers <- peekVector centersPtrPtr numCentersPtr deletePoint2fArray
 
     return (patternFound, centers)
   where
@@ -377,9 +360,13 @@ solvePnP
   -> [SolvePnPFlags]
   -> CvExcept (Point3f, Point3f)
 solvePnP
-  objectPoints imagePoints
-  cameraMatrix distCoeffs
-  useExtrinsicGuess flags = unsafeWrapException $
+  objectPoints
+  imagePoints
+  cameraMatrix
+  distCoeffs
+  useExtrinsicGuess
+  flags
+  = unsafeWrapException $
 
     withArrayPtr (V.map toPoint objectPoints) $ \objectPointsPtr ->
     withArrayPtr (V.map toPoint imagePoints)  $ \imagePointsPtr  ->
@@ -423,9 +410,7 @@ solvePnP
     c'solvePnPFlags     = marshalSolvePnPFlags flags
     c'useExtrinsicGuess = fromBool useExtrinsicGuess
 
-withArrayPtrLen array action =
-  withArrayPtr array (\arrayPtr -> action arrayPtr arrayLen)
-  where arrayLen = fromIntegral $ V.length array
+
 
 {- | Calculates a fundamental matrix from the corresponding points in two images
 
@@ -531,5 +516,57 @@ computeCorrespondEpilines points whichImage fm = unsafeWrapException $ do
     c'numPoints = fromIntegral $ V.length points
     c'whichImage = marshalWhichImage whichImage
 
+---------------
+-- Utils
 
+withArrayPtrLen
+  :: ( PlacementNew (C a)
+     , CSizeOf (C a), WithPtr a
+     , Num len
+     )
+  => V.Vector a
+  -> (Ptr (C a) -> len -> IO b)
+  -> IO b
+withArrayPtrLen array action =
+  withArrayPtr array (\arrayPtr -> action arrayPtr arrayLen)
+  where arrayLen = fromIntegral $ V.length array
 
+peekVector
+  :: ( FromPtr item
+     , Storable len
+     , Integral len
+     , arrayPtrPtr ~ Ptr (Ptr (Ptr (C item)))
+     )
+  => arrayPtrPtr
+  -> Ptr len
+  -> (arrayPtrPtr -> IO ())
+  -> IO (V.Vector item)
+peekVector arrayPtrPtr lengthPtr deleteFunc = do
+  arrayLen <- fromIntegral <$> peek lengthPtr
+  arrayPtr <- peek arrayPtrPtr
+  vector   <- V.fromList <$>
+    (mapM (fromPtr . pure) =<< peekArray arrayLen arrayPtr)
+
+  deleteFunc arrayPtrPtr
+
+  return vector
+
+-- Would love to make these generic, but not sure how to
+-- parameterize the $(Type ***)
+deleteMatArray :: Ptr (Ptr (Ptr C'Mat)) -> IO ()
+deleteMatArray arrayPtrPtr =
+  [C.block| void {
+      delete [] *$(Mat * * * arrayPtrPtr);
+  } |]
+
+-- deletePoint3fArray :: Ptr (Ptr (Ptr C'Point3f)) -> IO ()
+-- deletePoint3fArray arrayPtrPtr =
+--   [C.block| void {
+--       delete [] *$(Point3f * * * arrayPtrPtr);
+--   } |]
+
+deletePoint2fArray :: Ptr (Ptr (Ptr C'Point2f)) -> IO ()
+deletePoint2fArray arrayPtrPtr =
+  [C.block| void {
+      delete [] *$(Point2f * * * arrayPtrPtr);
+  } |]
