@@ -23,7 +23,7 @@ import "base" Foreign.Ptr (Ptr)
 import "base" Foreign.Marshal.Alloc ( alloca )
 import "base" Foreign.Marshal.Array ( peekArray )
 import "base" Foreign.Marshal.Utils ( toBool, fromBool )
-import "base" Foreign.Storable (peek)
+import "base" Foreign.Storable (peek, Storable)
 import "base" System.IO.Unsafe ( unsafePerformIO )
 import qualified "inline-c" Language.C.Inline as C
 import qualified "inline-c-cpp" Language.C.Inline.Cpp as C
@@ -113,7 +113,7 @@ marshalCalibrateCameraFlags = foldl' (.|.) 0 . map c'CalibrateCameraFlags
 calibrateCamera
     :: ( IsSize imageSize Int32
        , camMat     ~ Mat (ShapeT [3, 3]) ('S 1) ('S Double)
-       , distCoeffs ~ Mat shape           ('S 1) ('S Double)
+       , distCoeffs ~ Mat 'D              ('S 1) ('S Double)
        , IsPoint2 point2 CFloat
        , IsPoint3 point3 CFloat
        , rvecs ~ V.Vector (Mat shape ('S 1) depth)
@@ -122,118 +122,124 @@ calibrateCamera
     => V.Vector ( V.Vector (point3 CFloat) ) -- ^ Object points
     -> V.Vector ( V.Vector (point2 CFloat) ) -- ^ Image points
     -> imageSize Int32
-    -> camMat
-    -> distCoeffs
     -> [CalibrateCameraFlags]
     -> TermCriteria
     -> CvExcept (Double, camMat, distCoeffs, rvecs, tvecs)
 calibrateCamera
   objectPoints imagePoints
-  imageSize camMat
-  distCoeffs flags
-  termCriteria = unsafeWrapException $
-    withVectorOfVectorOfPoint3f objectPoints $ \objectPointsPtr objectPointsLengths ->
-    withVectorOfVectorOfPoint2f imagePoints  $ \imagePointsPtr imagePointsLengths  ->
-    withPtr (toSize imageSize)               $ \imageSizePtr    ->
-    withPtr camMat                           $ \camMatPtr       ->
-    withPtr distCoeffs                       $ \distCoeffsPtr   ->
-    withPtr termCriteria                     $ \termCriteriaPtr ->
+  imageSize flags
+  termCriteria = unsafeWrapException $ do
+    newCamMat     <- unsafeCoerceMat <$> newEmptyMat
+    newDistCoeffs <- unsafeCoerceMat <$> newEmptyMat
+    id $
+      withVectorOfVectorOfPoint3f objectPoints $ \objectPointsPtr objectPointsLengths ->
+      withVectorOfVectorOfPoint2f imagePoints  $ \imagePointsPtr imagePointsLengths   ->
+      withPtr (toSize imageSize)               $ \imageSizePtr                        ->
+      withPtr newCamMat                        $ \camMatPtr                           ->
+      withPtr newDistCoeffs                    $ \distCoeffsPtr                       ->
+      withPtr termCriteria                     $ \termCriteriaPtr                     ->
 
-    alloca $ \(rvecsLengthPtr :: Ptr Int32)             ->
-    alloca $ \(rvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat))) ->
-    alloca $ \(tvecsLengthPtr :: Ptr Int32)             ->
-    alloca $ \(tvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat))) ->
+      alloca $ \(rvecsLengthPtr :: Ptr Int32)             ->
+      alloca $ \(rvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat))) ->
+      alloca $ \(tvecsLengthPtr :: Ptr Int32)             ->
+      alloca $ \(tvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat))) ->
 
-    alloca $ \rmsPtr -> do
+      alloca $ \rmsPtr -> flip handleCvException
+        [cvExcept|
 
-    let c'calibrateCamera = do
-          [cvExcept|
+          // Create a vector of vector of Point3f for objectPoints
+          int32_t *objectPointsLengths = $(int32_t * objectPointsLengths);
+          int32_t numObjectPoints = $(int32_t c'objectPointsPtrSize);
 
-            // Create a vector of vector of Point3f for objectPoints
-            std::vector<std::vector<Point3f>> objectPoints;
-            int32_t *objectPointsLengths = $(int32_t * objectPointsLengths);
-            int32_t numObjectPoints = $(int32_t c'objectPointsPtrSize);
-            objectPoints.reserve(numObjectPoints);
-            for (int i = 0; i < numObjectPoints; i++) {
-              const Point3f *pointsAtIndex = $(const Point3f * * objectPointsPtr)[i];
-              const int32_t numPointsAtIndex = objectPointsLengths[i];
-              std::vector<Point3f> objectPointsAtIndexVec(
-                pointsAtIndex,
-                pointsAtIndex + numPointsAtIndex
-                );
-              objectPoints.push_back(objectPointsAtIndexVec);
-            }
-
-            // Create a vector of vector of Point2f for imagePoints
-            std::vector<std::vector<Point2f>> imagePoints;
-            int32_t *imagePointsLengths = $(int32_t * imagePointsLengths);
-            int32_t numImagePoints = $(int32_t c'imagePointsPtrSize);
-            imagePoints.reserve(numImagePoints);
-            for (int i = 0; i < numImagePoints; i++) {
-              const Point2f *pointsAtIndex = $(const Point2f * * imagePointsPtr)[i];
-              const int32_t numPointsAtIndex = imagePointsLengths[i];
-              std::vector<Point2f> imagePointsAtIndexVec(
-                pointsAtIndex,
-                pointsAtIndex + numPointsAtIndex
-                );
-              imagePoints.push_back(imagePointsAtIndexVec);
-            }
-
-            std::vector<cv::Mat> rvecs;
-            std::vector<cv::Mat> tvecs;
-
-            *$(double * rmsPtr) = cv::calibrateCamera
-              ( objectPoints
-              , imagePoints
-              , *$(Size2i * imageSizePtr)
-              , *$(Mat * camMatPtr)
-              , *$(Mat * distCoeffsPtr)
-              , rvecs
-              , tvecs
-              , $(int32_t c'calibrateCameraFlags)
-              , *$(TermCriteria * termCriteriaPtr)
+          std::vector<std::vector<Point3f>> objectPoints;
+          objectPoints.reserve(numObjectPoints);
+          for (int i = 0; i < numObjectPoints; i++) {
+            const Point3f *pointsAtIndex = $(const Point3f * * objectPointsPtr)[i];
+            const int32_t numPointsAtIndex = objectPointsLengths[i];
+            std::vector<Point3f> objectPointsAtIndexVec(
+              pointsAtIndex,
+              pointsAtIndex + numPointsAtIndex
               );
 
-            // Copy rvecs into result
-            cv::Mat * * * rvecsPtrPtr = $(Mat * * * rvecsPtrPtr);
-            cv::Mat * * rvecsPtr = new cv::Mat * [rvecs.size()];
-            *rvecsPtrPtr = rvecsPtr;
+            objectPoints.push_back(objectPointsAtIndexVec);
+          }
 
-            *$(int32_t * rvecsLengthPtr) = rvecs.size();
+          // Create a vector of vector of Point2f for imagePoints
+          int32_t *imagePointsLengths = $(int32_t * imagePointsLengths);
+          int32_t numImagePoints = $(int32_t c'imagePointsPtrSize);
 
-            for(int i = 0; i < rvecs.size(); i++){
-              rvecsPtr[i] = new cv::Mat(rvecs[i]);
-            }
+          std::vector<std::vector<Point2f>> imagePoints;
+          imagePoints.reserve(numImagePoints);
+          for (int i = 0; i < numImagePoints; i++) {
+            const Point2f *pointsAtIndex = $(const Point2f * * imagePointsPtr)[i];
+            const int32_t numPointsAtIndex = imagePointsLengths[i];
+            std::vector<Point2f> imagePointsAtIndexVec(
+              pointsAtIndex,
+              pointsAtIndex + numPointsAtIndex
+              );
 
-            // Copy tvecs into result
-            cv::Mat * * * tvecsPtrPtr = $(Mat * * * tvecsPtrPtr);
-            cv::Mat * * tvecsPtr = new cv::Mat * [tvecs.size()];
-            *tvecsPtrPtr = tvecsPtr;
+            imagePoints.push_back(imagePointsAtIndexVec);
+          }
 
-            *$(int32_t * tvecsLengthPtr) = tvecs.size();
+          std::vector<cv::Mat> rvecs;
+          std::vector<cv::Mat> tvecs;
 
-            for(int i = 0; i < tvecs.size(); i++){
-              tvecsPtr[i] = new cv::Mat(tvecs[i]);
-            }
-          |]
-    flip handleCvException c'calibrateCamera $ do
-      -- Extract the mats
+          *$(double * rmsPtr) = cv::calibrateCamera
+            ( objectPoints
+            , imagePoints
+            , *$(Size2i * imageSizePtr)
+            , *$(Mat * camMatPtr)
+            , *$(Mat * distCoeffsPtr)
+            , rvecs
+            , tvecs
+            , $(int32_t c'calibrateCameraFlags)
+            , *$(TermCriteria * termCriteriaPtr)
+            );
 
-      rvecs <- peekMatVector rvecsPtrPtr rvecsLengthPtr
-      tvecs <- peekMatVector tvecsPtrPtr tvecsLengthPtr
+          // Copy rvecs into result
+          cv::Mat * * * rvecsPtrPtr = $(Mat * * * rvecsPtrPtr);
+          cv::Mat * * rvecsPtr = new cv::Mat * [rvecs.size()];
+          *rvecsPtrPtr = rvecsPtr;
 
-      newCamMat     <- fromPtr (pure camMatPtr)
-      newDistCoeffs <- fromPtr (pure distCoeffsPtr)
+          *$(int32_t * rvecsLengthPtr) = rvecs.size();
 
-      rms <- realToFrac <$> peek rmsPtr
-      return (rms, newCamMat, newDistCoeffs, rvecs, tvecs)
+          for(int i = 0; i < rvecs.size(); i++){
+            rvecsPtr[i] = new cv::Mat(rvecs[i]);
+          }
+
+          // Copy tvecs into result
+          cv::Mat * * * tvecsPtrPtr = $(Mat * * * tvecsPtrPtr);
+          cv::Mat * * tvecsPtr = new cv::Mat * [tvecs.size()];
+          *tvecsPtrPtr = tvecsPtr;
+
+          *$(int32_t * tvecsLengthPtr) = tvecs.size();
+
+          for(int i = 0; i < tvecs.size(); i++){
+            tvecsPtr[i] = new cv::Mat(tvecs[i]);
+          }
+        |] $ do -- when no exception...
+
+          -- Extract the rotation and translation vectors
+          rvecs <- peekMatVector rvecsPtrPtr rvecsLengthPtr
+          tvecs <- peekMatVector tvecsPtrPtr tvecsLengthPtr
+
+          rms <- realToFrac <$> peek rmsPtr
+          return (rms, newCamMat, newDistCoeffs, rvecs, tvecs)
 
   where
     c'objectPointsPtrSize = fromIntegral $ V.length objectPoints
     c'imagePointsPtrSize  = fromIntegral $ V.length imagePoints
     c'calibrateCameraFlags = marshalCalibrateCameraFlags flags
 
-
+peekMatVector
+  :: ( C a ~ C'Mat
+     , FromPtr a
+     , Storable len
+     , Integral len
+     )
+  => Ptr (Ptr (Ptr C'Mat))
+  -> Ptr len
+  -> IO (V.Vector a)
 peekMatVector arrayPtrPtr lengthPtr = do
   arrayLength <- fromIntegral <$> peek lengthPtr
   arrayPtr     <- peek arrayPtrPtr
