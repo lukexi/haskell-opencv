@@ -23,6 +23,7 @@ module OpenCV
   , module OpenCV.ImgProc.StructuralAnalysis
   , module OpenCV.ImgProc.Types
   , module OpenCV.Photo
+  , module OpenCV.StructuredLight
   , module OpenCV.Video
   , module OpenCV.Video.MotionAnalysis
   , module OpenCV.VideoIO.VideoCapture
@@ -54,6 +55,7 @@ import OpenCV.ImgProc.StructuralAnalysis
 import OpenCV.ImgProc.Types
 import OpenCV.ImgProc.CascadeClassifier
 import OpenCV.Photo
+import OpenCV.StructuredLight
 import OpenCV.Video
 import OpenCV.Video.MotionAnalysis
 import OpenCV.VideoIO.VideoCapture

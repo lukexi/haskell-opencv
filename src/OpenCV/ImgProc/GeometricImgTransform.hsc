@@ -54,6 +54,7 @@ module OpenCV.ImgProc.GeometricImgTransform
     , remap
     , undistort
     , undistortPoints
+    , initUndistortRectifyMap
     ) where
 
 import "base" Data.Int ( Int32 )
@@ -448,7 +449,7 @@ data UndistortMapM1Type
   = UndistortMap'CV_32FC1
   | UndistortMap'CV_16SC2
 
-marshallM1Type = \case
+marshallUndistortMapM1Type = \case
   UndistortMap'CV_32FC1 -> c'CV_32FC1
   UndistortMap'CV_16SC2 -> c'CV_16SC2
 
@@ -489,4 +490,4 @@ initUndistortRectifyMap
   return (unsafeCoerceMat map1, unsafeCoerceMat map2)
 
   where
-    c'm1type = marshallM1Type m1type
+    c'm1type = marshallUndistortMapM1Type m1type

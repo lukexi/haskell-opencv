@@ -399,6 +399,7 @@ solvePnP
       *$(Point3f * * rvecPtrPtr) = new cv::Point3f(rvec);
       *$(Point3f * * tvecPtrPtr) = new cv::Point3f(tvec);
     |] $ do
+      -- FIXME need to free the Point3fs
       rvecPtr <- peek rvecPtrPtr
       tvecPtr <- peek tvecPtrPtr
       rvec <- fromPtr (pure rvecPtr)
@@ -569,4 +570,10 @@ deletePoint2fArray :: Ptr (Ptr (Ptr C'Point2f)) -> IO ()
 deletePoint2fArray arrayPtrPtr =
   [C.block| void {
       delete [] *$(Point2f * * * arrayPtrPtr);
+  } |]
+
+deletePoint3f :: (Ptr (Ptr C'Point3f)) -> IO ()
+deletePoint3f pointPtrPtr =
+  [C.block| void {
+      delete *$(Point3f * * pointPtrPtr);
   } |]
