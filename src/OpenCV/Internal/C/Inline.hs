@@ -123,7 +123,7 @@ openCvTypesTable = M.fromList
 
   , ( C.TypeName "CascadeClassifier", [t| C'CascadeClassifier |] )
 
-  , ( C.TypeName "GrayCodePattern",   [t| C'GrayCodePattern |] )
+  , ( C.TypeName "Ptr_GrayCodePattern",   [t| C'Ptr_GrayCodePattern |] )
 
   , ( C.TypeName "MouseCallback"   , [t| FunPtr C'MouseCallback    |] )
   , ( C.TypeName "TrackbarCallback", [t| FunPtr C'TrackbarCallback |] )

@@ -134,7 +134,7 @@ data C'VideoWriter
 data C'CascadeClassifier
 
 -- | Haskell representation of an OpenCV @cv::GrayCodePattern@ object
-data C'GrayCodePattern
+data C'Ptr_GrayCodePattern
 
 -- | Callback function for mouse events
 type C'MouseCallback
