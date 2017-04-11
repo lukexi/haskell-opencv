@@ -12,7 +12,6 @@ module OpenCV.Internal
   , allocVector
   , withArrayPtr
   , withArrayPtrLen
-  , deletePoint3f
   , deleteMatArray
   , deletePoint2fArray
   , deletePoint3fArray
@@ -153,8 +152,3 @@ deletePoint2fArray arrayPtrPtr =
       delete [] *$(Point2f * * * arrayPtrPtr);
   } |]
 
-deletePoint3f :: (Ptr (Ptr C'Point3f)) -> IO ()
-deletePoint3f pointPtrPtr =
-  [C.block| void {
-      delete *$(Point3f * * pointPtrPtr);
-  } |]

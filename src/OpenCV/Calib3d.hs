@@ -398,7 +398,6 @@ solvePnP
       *$(Point3f * * rvecPtrPtr) = new cv::Point3f(rvec);
       *$(Point3f * * tvecPtrPtr) = new cv::Point3f(tvec);
     |] $ do
-      -- FIXME need to free the Point3fs
       rvecPtr <- peek rvecPtrPtr
       tvecPtr <- peek tvecPtrPtr
       rvec <- fromPtr (pure rvecPtr)
