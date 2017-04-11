@@ -400,25 +400,43 @@ remap src mapping interpolationMethod borderMode = unsafeWrapException $ do
 
 
 
-undistort src cameraMatrix distCoeffs newCameraMatrix = unsafePerformIO $ do
+undistort src cameraMatrix distCoeffs = unsafePerformIO $ do
   dst <- newEmptyMat
 
   withPtr src               $ \srcPtr             ->
     withPtr dst             $ \dstPtr             ->
     withPtr cameraMatrix    $ \cameraMatrixPtr    ->
     withPtr distCoeffs      $ \distCoeffsPtr      ->
-    withPtr newCameraMatrix $ \newCameraMatrixPtr ->
       [CU.block| void {
         cv::undistort
           ( *$(Mat * srcPtr)
           , *$(Mat * dstPtr)
           , *$(Mat * cameraMatrixPtr)
           , *$(Mat * distCoeffsPtr)
-          , *$(Mat * newCameraMatrixPtr)
           );
       } |]
 
   return dst
+
+-- undistort src cameraMatrix distCoeffs newCameraMatrix = unsafePerformIO $ do
+--   dst <- newEmptyMat
+
+--   withPtr src               $ \srcPtr             ->
+--     withPtr dst             $ \dstPtr             ->
+--     withPtr cameraMatrix    $ \cameraMatrixPtr    ->
+--     withPtr distCoeffs      $ \distCoeffsPtr      ->
+--     withPtr newCameraMatrix $ \newCameraMatrixPtr ->
+--       [CU.block| void {
+--         cv::undistort
+--           ( *$(Mat * srcPtr)
+--           , *$(Mat * dstPtr)
+--           , *$(Mat * cameraMatrixPtr)
+--           , *$(Mat * distCoeffsPtr)
+--           // , *$(Mat * newCameraMatrixPtr)
+--           );
+--       } |]
+
+--   return dst
 
 
 undistortPoints src cameraMatrix distCoeffs = unsafePerformIO $ do
