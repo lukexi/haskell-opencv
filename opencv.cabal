@@ -60,7 +60,7 @@ library
       , src/OpenCV/Internal/Core/Types/Mat.cpp
       , src/OpenCV/Internal/Core/Types/Mat/ToFrom.cpp
       , src/OpenCV/Internal/Exception.cpp
-      , src/OpenCV/StructuredLight.cpp
+      -- , src/OpenCV/StructuredLight.cpp
       , src/OpenCV/Photo.cpp
       , src/OpenCV/Video.cpp
       , src/OpenCV/VideoIO/VideoCapture.cpp
@@ -121,7 +121,7 @@ library
         OpenCV.ImgProc.CascadeClassifier
         OpenCV.JSON
         OpenCV.Photo
-        OpenCV.StructuredLight
+        -- OpenCV.StructuredLight
         OpenCV.TypeLevel
         OpenCV.Unsafe
         OpenCV.Video
