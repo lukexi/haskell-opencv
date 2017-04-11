@@ -6,6 +6,7 @@ module OpenCV.StructuredLight
     ( newGrayCodePattern
     , setWhiteThreshold
     , setBlackThreshold
+    , generateGrayCodePatterns
     ) where
 
 import "base" Data.Int
@@ -19,6 +20,7 @@ import "base" Foreign.Marshal.Alloc ( alloca )
 import "base" Foreign.Marshal.Array ( peekArray )
 import "base" Foreign.Marshal.Utils ( toBool, fromBool )
 import "base" Foreign.Storable (peek, Storable)
+import "base" System.IO.Unsafe
 import qualified "inline-c" Language.C.Inline as C
 import qualified "inline-c" Language.C.Inline.Unsafe as CU
 import qualified "inline-c-cpp" Language.C.Inline.Cpp as C
@@ -80,6 +82,7 @@ newGrayCodePattern projectorSize = do
       } |]
   return grayCodePattern
 
+setWhiteThreshold :: GrayCodePattern -> CDouble -> IO ()
 setWhiteThreshold grayCodePattern thresh = do
   withPtr grayCodePattern $ \grayCodePatternPtr ->
     [CU.block| void {
@@ -87,9 +90,33 @@ setWhiteThreshold grayCodePattern thresh = do
       grayCodePattern->setWhiteThreshold($(double thresh));
     } |]
 
+setBlackThreshold :: GrayCodePattern -> CDouble -> IO ()
 setBlackThreshold grayCodePattern thresh = do
   withPtr grayCodePattern $ \grayCodePatternPtr ->
     [CU.block| void {
       GrayCodePattern * grayCodePattern = *$(Ptr_GrayCodePattern * grayCodePatternPtr);
       grayCodePattern->setBlackThreshold($(double thresh));
     } |]
+
+generateGrayCodePatterns :: GrayCodePattern -> V.Vector (Mat ('S [h, w]) ('S 1) ('S Word8))
+generateGrayCodePatterns grayCodePattern = unsafePerformIO $
+  withPtr grayCodePattern $ \grayCodePatternPtr ->
+  allocVector $ \matsPtrPtr matsLengthPtr -> do
+    [C.block| void {
+      GrayCodePattern * grayCodePattern = *$(Ptr_GrayCodePattern * grayCodePatternPtr);
+
+      std::vector<Mat> mats;
+      grayCodePattern->generate(mats);
+
+      cv::Mat * * * matsPtrPtr = $(Mat * * * matsPtrPtr);
+      cv::Mat * * matsPtr = new cv::Mat * [mats.size()];
+      *matsPtrPtr = matsPtr;
+
+      *$(int32_t * matsLengthPtr) = mats.size();
+
+      for(int i = 0; i < mats.size(); i++){
+        matsPtr[i] = new cv::Mat(mats[i]);
+      }
+
+    }|]
+    peekVector matsPtrPtr matsLengthPtr deleteMatArray

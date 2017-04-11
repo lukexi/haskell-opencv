@@ -272,50 +272,6 @@ withVectorOfVectorOfPoint3f vecOfVecs act =
     npts :: VS.Vector Int32
     npts = VS.convert $ V.map (fromIntegral . V.length) vecOfVecs
 
--- | Perform an action with a temporary pointer to an array of values
---
--- The input values are placed consecutively in memory using the 'PlacementNew'
--- mechanism.
---
--- This function is intended for types which are not managed by the Haskell
--- runtime, but by a foreign system (such as C).
---
--- The pointer is not guaranteed to be usuable outside the scope of this
--- function. The same warnings apply as for 'withForeignPtr'.
-withArrayPtr
-    :: forall a b
-     . (WithPtr a, CSizeOf (C a), PlacementNew (C a))
-    => V.Vector a
-    -> (Ptr (C a) -> IO b)
-    -> IO b
-withArrayPtr arr act =
-    allocaBytes arraySize $ \arrPtr ->
-      bracket_
-        (V.foldM'_ copyNext arrPtr arr)
-        (deconstructArray arrPtr )
-        (act arrPtr)
-  where
-    elemSize = cSizeOf (Proxy :: Proxy (C a))
-    arraySize = elemSize * V.length arr
-
-    copyNext :: Ptr (C a) -> a -> IO (Ptr (C a))
-    copyNext !ptr obj = copyObj ptr obj $> plusPtr ptr elemSize
-
-    copyObj :: Ptr (C a) -> a -> IO ()
-    copyObj dstPtr src =
-        withPtr src $ \srcPtr ->
-          placementNew srcPtr dstPtr
-
-    deconstructArray :: Ptr (C a) -> IO ()
-    deconstructArray !begin = deconstructNext begin
-      where
-        deconstructNext !ptr
-            | ptr == end = pure ()
-            | otherwise = do placementDelete ptr
-                             deconstructNext $ ptr `plusPtr` elemSize
-
-        end :: Ptr (C a)
-        end = begin `plusPtr` arraySize
 
 --------------------------------------------------------------------------------
 

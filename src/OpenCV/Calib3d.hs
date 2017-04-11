@@ -36,6 +36,7 @@ import "this" OpenCV.Internal.Core.Types
 import "this" OpenCV.Internal.Core.Types.Mat
 import "this" OpenCV.Internal.Exception
 import "this" OpenCV.TypeLevel
+import "this" OpenCV.Internal
 import "transformers" Control.Monad.Trans.Except
 import qualified "vector" Data.Vector as V
 
@@ -140,10 +141,8 @@ calibrateCamera
       withPtr newDistCoeffs                    $ \distCoeffsPtr                       ->
       withPtr termCriteria                     $ \termCriteriaPtr                     ->
 
-      alloca $ \(rvecsLengthPtr :: Ptr Int32)             ->
-      alloca $ \(rvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat))) ->
-      alloca $ \(tvecsLengthPtr :: Ptr Int32)             ->
-      alloca $ \(tvecsPtrPtr    :: Ptr (Ptr (Ptr C'Mat))) ->
+      allocVector $ \(rvecsPtrPtr :: Ptr (Ptr (Ptr C'Mat))) rvecsLengthPtr ->
+      allocVector $ \(tvecsPtrPtr :: Ptr (Ptr (Ptr C'Mat))) tvecsLengthPtr ->
 
       alloca $ \rmsPtr -> flip handleCvException
         [cvExcept|
@@ -204,7 +203,7 @@ calibrateCamera
 
           *$(int32_t * rvecsLengthPtr) = rvecs.size();
 
-          for(int i = 0; i < rvecs.size(); i++){
+          for(unsigned int i = 0; i < rvecs.size(); i++){
             rvecsPtr[i] = new cv::Mat(rvecs[i]);
           }
 
@@ -215,7 +214,7 @@ calibrateCamera
 
           *$(int32_t * tvecsLengthPtr) = tvecs.size();
 
-          for(int i = 0; i < tvecs.size(); i++){
+          for(unsigned int i = 0; i < tvecs.size(); i++){
             tvecsPtr[i] = new cv::Mat(tvecs[i]);
           }
         |] $ do -- when no exception...
@@ -517,63 +516,4 @@ computeCorrespondEpilines points whichImage fm = unsafeWrapException $ do
     c'numPoints = fromIntegral $ V.length points
     c'whichImage = marshalWhichImage whichImage
 
----------------
--- Utils
 
-withArrayPtrLen
-  :: ( PlacementNew (C a)
-     , CSizeOf (C a), WithPtr a
-     , Num len
-     )
-  => V.Vector a
-  -> (Ptr (C a) -> len -> IO b)
-  -> IO b
-withArrayPtrLen array action =
-  withArrayPtr array (\arrayPtr -> action arrayPtr arrayLen)
-  where arrayLen = fromIntegral $ V.length array
-
-peekVector
-  :: ( FromPtr item
-     , Storable len
-     , Integral len
-     , arrayPtrPtr ~ Ptr (Ptr (Ptr (C item)))
-     )
-  => arrayPtrPtr
-  -> Ptr len
-  -> (arrayPtrPtr -> IO ())
-  -> IO (V.Vector item)
-peekVector arrayPtrPtr lengthPtr deleteFunc = do
-  arrayLen <- fromIntegral <$> peek lengthPtr
-  arrayPtr <- peek arrayPtrPtr
-  vector   <- V.fromList <$>
-    (mapM (fromPtr . pure) =<< peekArray arrayLen arrayPtr)
-
-  deleteFunc arrayPtrPtr
-
-  return vector
-
--- Would love to make these generic, but not sure how to
--- parameterize the $(Type ***)
-deleteMatArray :: Ptr (Ptr (Ptr C'Mat)) -> IO ()
-deleteMatArray arrayPtrPtr =
-  [C.block| void {
-      delete [] *$(Mat * * * arrayPtrPtr);
-  } |]
-
--- deletePoint3fArray :: Ptr (Ptr (Ptr C'Point3f)) -> IO ()
--- deletePoint3fArray arrayPtrPtr =
---   [C.block| void {
---       delete [] *$(Point3f * * * arrayPtrPtr);
---   } |]
-
-deletePoint2fArray :: Ptr (Ptr (Ptr C'Point2f)) -> IO ()
-deletePoint2fArray arrayPtrPtr =
-  [C.block| void {
-      delete [] *$(Point2f * * * arrayPtrPtr);
-  } |]
-
-deletePoint3f :: (Ptr (Ptr C'Point3f)) -> IO ()
-deletePoint3f pointPtrPtr =
-  [C.block| void {
-      delete *$(Point3f * * pointPtrPtr);
-  } |]
