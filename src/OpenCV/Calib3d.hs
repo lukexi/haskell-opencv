@@ -118,8 +118,8 @@ calibrateCamera
        , distCoeffs ~ Mat 'D              ('S 1) ('S Double)
        , IsPoint2 point2 CFloat
        , IsPoint3 point3 CFloat
-       , rvecs ~ V.Vector (Mat shape ('S 1) depth)
-       , tvecs ~ V.Vector (Mat shape ('S 1) depth)
+       , rvecs ~ V.Vector Point3f
+       , tvecs ~ V.Vector Point3f
        )
     => V.Vector ( V.Vector (point3 CFloat) ) -- ^ Object points
     -> V.Vector ( V.Vector (point2 CFloat) ) -- ^ Image points
@@ -141,8 +141,8 @@ calibrateCamera
       withPtr newDistCoeffs                    $ \distCoeffsPtr                       ->
       withPtr termCriteria                     $ \termCriteriaPtr                     ->
 
-      allocVector $ \(rvecsPtrPtr :: Ptr (Ptr (Ptr C'Mat))) rvecsLengthPtr ->
-      allocVector $ \(tvecsPtrPtr :: Ptr (Ptr (Ptr C'Mat))) tvecsLengthPtr ->
+      allocVector $ \(rvecsPtrPtr :: Ptr (Ptr (Ptr C'Point3f))) rvecsLengthPtr ->
+      allocVector $ \(tvecsPtrPtr :: Ptr (Ptr (Ptr C'Point3f))) tvecsLengthPtr ->
 
       alloca $ \rmsPtr -> flip handleCvException
         [cvExcept|
@@ -197,31 +197,31 @@ calibrateCamera
             );
 
           // Copy rvecs into result
-          cv::Mat * * * rvecsPtrPtr = $(Mat * * * rvecsPtrPtr);
-          cv::Mat * * rvecsPtr = new cv::Mat * [rvecs.size()];
+          cv::Point3f * * * rvecsPtrPtr = $(Point3f * * * rvecsPtrPtr);
+          cv::Point3f * * rvecsPtr = new cv::Point3f * [rvecs.size()];
           *rvecsPtrPtr = rvecsPtr;
 
           *$(int32_t * rvecsLengthPtr) = rvecs.size();
 
           for(unsigned int i = 0; i < rvecs.size(); i++){
-            rvecsPtr[i] = new cv::Mat(rvecs[i]);
+            rvecsPtr[i] = new cv::Point3f(rvecs[i]);
           }
 
           // Copy tvecs into result
-          cv::Mat * * * tvecsPtrPtr = $(Mat * * * tvecsPtrPtr);
-          cv::Mat * * tvecsPtr = new cv::Mat * [tvecs.size()];
+          cv::Point3f * * * tvecsPtrPtr = $(Point3f * * * tvecsPtrPtr);
+          cv::Point3f * * tvecsPtr = new cv::Point3f * [tvecs.size()];
           *tvecsPtrPtr = tvecsPtr;
 
           *$(int32_t * tvecsLengthPtr) = tvecs.size();
 
           for(unsigned int i = 0; i < tvecs.size(); i++){
-            tvecsPtr[i] = new cv::Mat(tvecs[i]);
+            tvecsPtr[i] = new cv::Point3f(tvecs[i]);
           }
         |] $ do -- when no exception...
 
           -- Extract the rotation and translation vectors
-          rvecs <- peekVector rvecsPtrPtr rvecsLengthPtr deleteMatArray
-          tvecs <- peekVector tvecsPtrPtr tvecsLengthPtr deleteMatArray
+          rvecs <- peekVector rvecsPtrPtr rvecsLengthPtr deletePoint3fArray
+          tvecs <- peekVector tvecsPtrPtr tvecsLengthPtr deletePoint3fArray
 
           rms <- realToFrac <$> peek rmsPtr
           return (rms, newCamMat, newDistCoeffs, rvecs, tvecs)
